@@ -1,0 +1,20 @@
+{
+  "name": "Robi Technology",
+  "short_name": "Robi Technology",
+  "icons": [
+    {
+      "src": "/favicon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-512x512.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#f14010",
+  "background_color": "#1a1a1a",
+  "display": "standalone"
+} 
