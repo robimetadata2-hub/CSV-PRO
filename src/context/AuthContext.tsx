@@ -3,7 +3,11 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { checkActiveSession, setActiveSession, removeActiveSession } from '@/utils/supabaseUtils';
+import {
+  checkActiveSession,
+  setActiveSession,
+  removeActiveSession
+} from '@/utils/supabaseUtils';
 import { UserProfile } from '@/types/supabase';
 
 interface AuthContextType {
@@ -29,68 +33,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [canGenerateMetadata, setCanGenerateMetadata] = useState<boolean>(false);
-  const [apiKey, setApiKey] = useState<string>('');
+
+  // ✅ API key now comes from environment variable
+  const [apiKey, setApiKey] = useState<string>(
+    import.meta.env.VITE_GEMINI_API_KEY || ''
+  );
+
   const navigate = useNavigate();
 
-  // Define the list of API keys
-  const API_KEYS = [
-    'AIzaSyDml9XSTLPg83r9LYJytVWzB225PGjjZms',
-    'AIzaSyD6UM2-DYAcHWDk005-HAzBAFmZfus9fSA',
-    'AIzaSyCPBg14R8PY7rh48ovIoKmpT3LHyOiPvLI',
-    'AIzaSyCPBg14R8PY7rh48ovIoKmpT3LHyOiPvLI',
-    'AIzaSyD6UM2-DYAcHWDk005-HAzBAFmZfus9fSA',
-    'AIzaSyAIstbYpqJ09epoUw_Mf1IX3ilslqW7KKc',
-    'AIzaSyA_ALrz_Dq_Ng3NcIbMB1hO52xEoVtLsSw',
-    'AIzaSyAMiWClJZRIQFsPktNVXWKiKN-MSF4gQXY',
-    'AIzaSyBt-xmLLYomUmnlTRE1-NNyh4dpUHaDDlU',
-    'AIzaSyAGheV4z8nhuVtAIF9Skfg4xkVM1-ML638',
-    'AIzaSyD6wzrV3TGP6H2F0zBouHr0j3rWtC0HJ1k',
-    'AIzaSyAj5cj6uFO1lZqI6cPfc8s1nQFQs03PxAA',
-    'AIzaSyD3q-TvESGAf0UngLyh-H7sbieh3kUxHiI'
-  ];
-
-  // Function to get a random API key
+  // ✅ Safe API key getter (Netlify-friendly)
   const getRandomApiKey = (): string => {
-    const randomIndex = Math.floor(Math.random() * API_KEYS.length);
-    return API_KEYS[randomIndex];
+    return import.meta.env.VITE_GEMINI_API_KEY;
   };
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, currentSession) => {
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
 
-        // Don't fetch profile here to avoid race condition
-        // Instead, defer with setTimeout
-        if (currentSession?.user) {
-          setTimeout(() => {
-            fetchUserProfile(currentSession.user.id);
-          }, 0);
-        } else {
-          setProfile(null);
-        }
+      if (currentSession?.user) {
+        setTimeout(() => {
+          fetchUserProfile(currentSession.user.id);
+        }, 0);
+      } else {
+        setProfile(null);
       }
-    );
+    });
 
-    // THEN check for existing session
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
-      
+
       if (currentSession?.user) {
         fetchUserProfile(currentSession.user.id);
       }
-      
+
       setIsLoading(false);
     });
-
-    // Check for stored API key
-    const storedApiKey = localStorage.getItem('gemini-api-key');
-    if (storedApiKey) {
-      setApiKey(storedApiKey);
-    }
 
     return () => {
       subscription.unsubscribe();
@@ -98,9 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   useEffect(() => {
-    // Check if user can generate metadata based on credits and premium status
     if (profile) {
-      // Always allow generating metadata regardless of credits or premium status
       setCanGenerateMetadata(true);
     } else {
       setCanGenerateMetadata(false);
@@ -126,65 +105,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Force sign out a user from any existing sessions
   const forceSignOut = async (email: string) => {
     try {
-      // Use functions.invoke instead of rpc
-      const { error } = await supabase.functions.invoke('remove_active_session_by_email', {
-        body: { user_email: email }
-      });
-      
-      if (error) {
-        console.error('Error in force sign out:', error);
-        throw error;
-      }
+      const { error } = await supabase.functions.invoke(
+        'remove_active_session_by_email',
+        {
+          body: { user_email: email }
+        }
+      );
 
-      return;
+      if (error) throw error;
     } catch (error) {
       console.error('Error in forceSignOut:', error);
       throw error;
     }
   };
 
-  // Check if a user is already logged in elsewhere
   const checkUserActiveSession = async (email: string): Promise<boolean> => {
     return await checkActiveSession(email);
   };
 
   const signIn = async (email: string, password: string) => {
     try {
-      // Check if the user is already logged in elsewhere
       const isActiveSession = await checkUserActiveSession(email);
       if (isActiveSession) {
         const confirmForceLogout = window.confirm(
-          'This account is already logged in on another device or browser. Would you like to force logout from the other session and continue?'
+          'This account is already logged in elsewhere. Force logout and continue?'
         );
-        
+
         if (!confirmForceLogout) {
-          toast.error('Login cancelled - account is already active elsewhere');
+          toast.error('Login cancelled');
           return;
         }
-        
-        // User confirmed, force logout from other sessions
+
         await forceSignOut(email);
-        toast.success('Previous session has been terminated');
+        toast.success('Previous session terminated');
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        password,
+        password
       });
 
       if (error) throw error;
-      
-      // Set the user as active
+
       if (data?.user) {
-        const sessionId = data.session?.access_token.slice(-10) || Date.now().toString();
+        const sessionId =
+          data.session?.access_token.slice(-10) || Date.now().toString();
         await setActiveSession(data.user.id, email, sessionId);
-        
-        // No longer auto-assign API key - users will need to set it manually
       }
-      
+
       toast.success('Signed in successfully');
       navigate('/');
     } catch (error) {
@@ -198,12 +168,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { error } = await supabase.auth.signUp({
         email,
-        password,
+        password
       });
 
       if (error) throw error;
-      
-      toast.success('Signed up successfully! Please check your email for verification.');
+
+      toast.success('Signed up successfully! Check your email.');
     } catch (error) {
       console.error('Error signing up:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to sign up');
@@ -213,14 +183,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
-      // Remove the user from active sessions before signing out
       if (user) {
         await removeActiveSession(user.id);
       }
-      
+
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      
+
       toast.success('Signed out successfully');
       navigate('/auth');
     } catch (error) {
@@ -231,28 +200,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const incrementCreditsUsed = async (): Promise<boolean> => {
     if (!user || !profile) return false;
-    
-    // All users can use premium features, regardless of status
     return true;
   };
 
-  // Add a heartbeat function to keep the session alive
   useEffect(() => {
     const updateSessionActivity = async () => {
       if (user && session) {
-        const sessionId = session.access_token.slice(-10) || Date.now().toString();
+        const sessionId =
+          session.access_token.slice(-10) || Date.now().toString();
         await setActiveSession(user.id, user.email || '', sessionId);
       }
     };
 
-    // Update session activity every 5 minutes
     const intervalId = setInterval(updateSessionActivity, 5 * 60 * 1000);
-    
-    // Clean up interval on unmount
     return () => clearInterval(intervalId);
   }, [user, session]);
 
-  // Listen for window close or tab close to remove the active session
   useEffect(() => {
     const handleBeforeUnload = async () => {
       if (user) {
@@ -261,10 +224,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    
-    return () => {
+    return () =>
       window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
   }, [user]);
 
   const value = {
@@ -291,7 +252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
